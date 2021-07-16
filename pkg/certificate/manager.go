@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,12 +16,14 @@ limitations under the License.
 package certificate
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
-
-	"github.com/pkg/errors"
 
 	"github.com/cloudflare/cfssl/certinfo"
 	"github.com/cloudflare/cfssl/cli"
@@ -102,7 +104,7 @@ func (m *Manager) EnsureCertificate(certReq Request, ownerName string) (Certific
 
 	// if regenerateCert returns true, it means we need to create the certs
 	if m.regenerateCert(certReq, keyFile, certFile) {
-		logrus.Debug("creating certificates")
+		logrus.Debugf("creating certificate %s", certFile)
 		req := csr.CertificateRequest{
 			KeyRequest: csr.NewKeyRequest(),
 			CN:         certReq.CN,
@@ -171,11 +173,11 @@ func (m *Manager) EnsureCertificate(certReq Request, ownerName string) (Certific
 
 	cert, err := ioutil.ReadFile(certFile)
 	if err != nil {
-		return Certificate{}, errors.Wrapf(err, "failed to read ca cert %s for %s", certFile, certReq.Name)
+		return Certificate{}, fmt.Errorf("failed to read ca cert %s for %s: %w", certFile, certReq.Name, err)
 	}
 	key, err := ioutil.ReadFile(keyFile)
 	if err != nil {
-		return Certificate{}, errors.Wrapf(err, "failed to read ca key %s for %s", keyFile, certReq.Name)
+		return Certificate{}, fmt.Errorf("failed to read ca key %s for %s: %w", keyFile, certReq.Name, err)
 	}
 
 	return Certificate{
@@ -197,23 +199,90 @@ func (m *Manager) regenerateCert(certReq Request, keyFile string, certFile strin
 	}
 
 	if cert, err = certinfo.ParseCertificateFile(certFile); err != nil {
-		logrus.Debugf("unable to parse certificate file: %v", err)
+		logrus.Warnf("unable to parse certificate file at %s: %v", certFile, err)
 		return true
 	}
 
-	// if existing SANs are different than configured, delete the certificate to re-generate it
-	if !util.IsStringArrayEqual(certReq.Hostnames, cert.SANs) {
-		logrus.Debug("found changes in SAN configuration. attempting to re-generate files")
-
-		files := []string{certFile, keyFile}
-		for _, f := range files {
-			logrus.Debugf("deleting file %v for certificate re-generation", f)
-			if err := os.Remove(f); err != nil {
-				logrus.Errorf("failed to delete file: %v", f)
-			}
-		}
+	if isManagedByK0s(cert) {
 		return true
 	}
-	// no changes are detected. continue
+
+	logrus.Debugf("cert regeneration not needed for %s, not managed by k0s: %s", certFile, cert.Issuer.CommonName)
 	return false
+}
+
+// checks if the cert issuer (CA) is a k0s setup one
+func isManagedByK0s(cert *certinfo.Certificate) bool {
+	switch cert.Issuer.CommonName {
+	case "kubernetes-ca":
+		return true
+	case "kubernetes-front-proxy-ca":
+		return true
+	case "etcd-ca":
+		return true
+	}
+
+	return false
+}
+
+func (m *Manager) CreateKeyPair(name string, k0sVars constant.CfgVars, owner string) error {
+	keyFile := filepath.Join(k0sVars.CertRootDir, fmt.Sprintf("%s.key", name))
+	pubFile := filepath.Join(k0sVars.CertRootDir, fmt.Sprintf("%s.pub", name))
+
+	if util.FileExists(keyFile) && util.FileExists(pubFile) {
+		return util.ChownFile(keyFile, owner, constant.CertSecureMode)
+	}
+
+	reader := rand.Reader
+	bitSize := 2048
+
+	key, err := rsa.GenerateKey(reader, bitSize)
+	if err != nil {
+		return err
+	}
+
+	var privateKey = &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	}
+
+	outFile, err := os.OpenFile(keyFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, constant.CertSecureMode)
+	if err != nil {
+		return err
+	}
+	defer outFile.Close()
+
+	err = util.ChownFile(keyFile, owner, constant.CertSecureMode)
+	if err != nil {
+		return err
+	}
+
+	err = pem.Encode(outFile, privateKey)
+	if err != nil {
+		return err
+	}
+
+	// note to the next reader: key.Public() != key.PublicKey
+	pubBytes, err := x509.MarshalPKIXPublicKey(key.Public())
+	if err != nil {
+		return err
+	}
+
+	var pemkey = &pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: pubBytes,
+	}
+
+	pemfile, err := os.Create(pubFile)
+	if err != nil {
+		return err
+	}
+	defer pemfile.Close()
+
+	err = pem.Encode(pemfile, pemkey)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -13,17 +13,19 @@ import (
 
 // Component is a telemetry component for k0s component manager
 type Component struct {
-	ClusterConfig *config.ClusterConfig
-	K0sVars       constant.CfgVars
-	Version       string
+	ClusterConfig     *config.ClusterConfig
+	K0sVars           constant.CfgVars
+	Version           string
+	KubeClientFactory kubeutil.ClientFactory
 
 	kubernetesClient kubernetes.Interface
 	analyticsClient  analyticsClient
 
-	log      *logrus.Entry
-	stopCh   chan struct{}
-	interval time.Duration
+	log    *logrus.Entry
+	stopCh chan struct{}
 }
+
+var interval = time.Minute * 10
 
 // Init set up for external service clients (segment, k8s api)
 func (c *Component) Init() error {
@@ -34,7 +36,6 @@ func (c *Component) Init() error {
 		return nil
 	}
 
-	c.interval = c.ClusterConfig.Telemetry.Interval
 	c.stopCh = make(chan struct{})
 	c.log.Info("kube client has been init")
 	c.analyticsClient = newSegmentClient(segmentToken)
@@ -43,7 +44,7 @@ func (c *Component) Init() error {
 }
 
 func (c *Component) retrieveKubeClient(ch chan struct{}) {
-	client, err := kubeutil.Client(c.K0sVars.AdminKubeConfigPath)
+	client, err := c.KubeClientFactory.GetClient()
 	if err != nil {
 		c.log.WithError(err).Warning("can't init kube client")
 		return
@@ -85,7 +86,7 @@ func (c *Component) Healthy() error {
 }
 
 func (c Component) run() {
-	ticker := time.NewTicker(c.interval)
+	ticker := time.NewTicker(interval)
 	for {
 		select {
 		case <-ticker.C:

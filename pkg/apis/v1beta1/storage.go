@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/k0sproject/k0s/internal/util"
+	"github.com/k0sproject/k0s/pkg/constant"
 )
 
 // supported storage types
@@ -29,10 +30,12 @@ const (
 	KineStorageType = "kine"
 )
 
+var _ Validateable = (*StorageSpec)(nil)
+
 // StorageSpec defines the storage related config options
 type StorageSpec struct {
 	Type string      `yaml:"type"`
-	Kine *KineConfig `yaml:"kine"`
+	Kine *KineConfig `yaml:"kine,omitempty"`
 	Etcd *EtcdConfig `yaml:"etcd"`
 }
 
@@ -42,7 +45,13 @@ type KineConfig struct {
 }
 
 // DefaultStorageSpec creates StorageSpec with sane defaults
-func DefaultStorageSpec() *StorageSpec {
+func DefaultStorageSpec(k0sVars constant.CfgVars) *StorageSpec {
+	if k0sVars.DefaultStorageType == KineStorageType {
+		return &StorageSpec{
+			Type: KineStorageType,
+			Kine: DefaultKineConfig(k0sVars.DataDir),
+		}
+	}
 	return &StorageSpec{
 		Type: EtcdStorageType,
 		Etcd: DefaultEtcdConfig(),
@@ -81,6 +90,11 @@ func (s *StorageSpec) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	if err := unmarshal(yc); err != nil {
 		return err
 	}
+	return nil
+}
+
+// Validate validates storage specs correctness
+func (s *StorageSpec) Validate() []error {
 	return nil
 }
 

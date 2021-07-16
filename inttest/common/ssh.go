@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,13 +17,11 @@ package common
 
 import (
 	"fmt"
+	"github.com/mitchellh/go-homedir"
+	"golang.org/x/crypto/ssh"
 	"io/ioutil"
 	"os"
 	"strings"
-
-	ssh "golang.org/x/crypto/ssh"
-
-	"github.com/mitchellh/go-homedir"
 )
 
 // SSHConnection describes an SSH connection

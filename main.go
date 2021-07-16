@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,13 +16,14 @@ limitations under the License.
 package main
 
 import (
+	_ "net/http/pprof"
 	"os"
 
 	"github.com/k0sproject/k0s/cmd"
 	"github.com/sirupsen/logrus"
 )
 
-//go:generate go run gen_bindata.go -pkg assets -gofile pkg/assets/zz_generated_offsets.go -prefix embedded-bins/staging/linux/ embedded-bins/staging/linux/bin
+//go:generate make generate-bindata
 
 func init() {
 

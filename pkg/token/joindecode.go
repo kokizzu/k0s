@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ import (
 	"io"
 )
 
-// JoinDecode decodes an token string that is encoded with JoinEncode
-func JoinDecode(token string) ([]byte, error) {
+// DecodeJoinToken decodes an token string that is encoded with JoinEncode
+func DecodeJoinToken(token string) ([]byte, error) {
 	gzData, err := base64.StdEncoding.DecodeString(token)
 	if err != nil {
 		return nil, err

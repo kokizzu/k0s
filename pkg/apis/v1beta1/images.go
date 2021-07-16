@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -40,9 +40,11 @@ type ClusterImages struct {
 	KubeProxy     ImageSpec `yaml:"kubeproxy"`
 	CoreDNS       ImageSpec `yaml:"coredns"`
 
-	Calico CalicoImageSpec `yaml:"calico"`
+	Calico     CalicoImageSpec     `yaml:"calico"`
+	KubeRouter KubeRouterImageSpec `yaml:"kuberouter"`
 
-	Repository string `yaml:"repository,omitempty"`
+	Repository        string `yaml:"repository,omitempty"`
+	DefaultPullPolicy string `yaml:"default_pull_policy,omitempty"`
 }
 
 func (ci *ClusterImages) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -52,7 +54,7 @@ func (ci *ClusterImages) UnmarshalYAML(unmarshal func(interface{}) error) error 
 		return err
 	}
 	ci.overrideImageRepositories()
-
+	ci.DefaultPullPolicy = "IfNotPresent"
 	return nil
 }
 
@@ -68,22 +70,29 @@ func (ci *ClusterImages) overrideImageRepositories() {
 	override(&ci.KubeProxy)
 	override(&ci.CoreDNS)
 	override(&ci.Calico.CNI)
-	override(&ci.Calico.FlexVolume)
 	override(&ci.Calico.Node)
 	override(&ci.Calico.KubeControllers)
+	override(&ci.KubeRouter.CNI)
+	override(&ci.KubeRouter.CNIInstaller)
 }
 
 // CalicoImageSpec config group for calico related image settings
 type CalicoImageSpec struct {
 	CNI             ImageSpec `yaml:"cni"`
-	FlexVolume      ImageSpec `yaml:"flexvolume"`
 	Node            ImageSpec `yaml:"node"`
 	KubeControllers ImageSpec `yaml:"kubecontrollers"`
+}
+
+// KubeRouterImageSpec config group for kube-router related images
+type KubeRouterImageSpec struct {
+	CNI          ImageSpec `yaml:"cni"`
+	CNIInstaller ImageSpec `yaml:"cniInstaller"`
 }
 
 // DefaultClusterImages default image settings
 func DefaultClusterImages() *ClusterImages {
 	return &ClusterImages{
+		DefaultPullPolicy: "IfNotPresent",
 		Konnectivity: ImageSpec{
 			Image:   constant.KonnectivityImage,
 			Version: constant.KonnectivityImageVersion,
@@ -103,19 +112,25 @@ func DefaultClusterImages() *ClusterImages {
 		Calico: CalicoImageSpec{
 			CNI: ImageSpec{
 				Image:   constant.CalicoImage,
-				Version: constant.CalicoImageVersion,
-			},
-			FlexVolume: ImageSpec{
-				Image:   constant.FlexVolumeImage,
-				Version: constant.FlexVolumeImageVersion,
+				Version: constant.CalicoComponentImagesVersion,
 			},
 			Node: ImageSpec{
 				Image:   constant.CalicoNodeImage,
-				Version: constant.CalicoNodeImageVersion,
+				Version: constant.CalicoComponentImagesVersion,
 			},
 			KubeControllers: ImageSpec{
 				Image:   constant.KubeControllerImage,
-				Version: constant.KubeControllerImageVersion,
+				Version: constant.CalicoComponentImagesVersion,
+			},
+		},
+		KubeRouter: KubeRouterImageSpec{
+			CNI: ImageSpec{
+				Image:   constant.KubeRouterCNIImage,
+				Version: constant.KubeRouterCNIImageVersion,
+			},
+			CNIInstaller: ImageSpec{
+				Image:   constant.KubeRouterCNIInstallerImage,
+				Version: constant.KubeRouterCNIInstallerImageVersion,
 			},
 		},
 	}
@@ -135,4 +150,9 @@ func overrideRepository(repository string, originalImage string) string {
 		return strings.Replace(originalImage, host, repository, 1)
 	}
 	return fmt.Sprintf("%s/%s", repository, originalImage)
+}
+
+// Validate stub for Validateable interface
+func (ci *ClusterImages) Validate() []error {
+	return nil
 }

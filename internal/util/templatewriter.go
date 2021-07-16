@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@ limitations under the License.
 package util
 
 import (
-	"html/template"
+	"fmt"
 	"io"
 	"os"
+	"text/template"
 
 	"github.com/Masterminds/sprig"
-	"github.com/pkg/errors"
 
 	"github.com/k0sproject/k0s/pkg/constant"
 )
@@ -38,20 +38,21 @@ type TemplateWriter struct {
 func (p *TemplateWriter) Write() error {
 	podFile, err := os.OpenFile(p.Path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, constant.CertMode)
 	if err != nil {
-		return errors.Wrapf(err, "failed to open pod file for %s", p.Name)
+		return fmt.Errorf("failed to open pod file for %s: %w", p.Name, err)
 	}
+	defer podFile.Close()
 	return p.WriteToBuffer(podFile)
 }
 
 // WriteToBuffer writes executed template tot he given writer
 func (p *TemplateWriter) WriteToBuffer(w io.Writer) error {
-	t, err := template.New(p.Name).Funcs(sprig.FuncMap()).Parse(p.Template)
+	t, err := template.New(p.Name).Funcs(sprig.TxtFuncMap()).Parse(p.Template)
 	if err != nil {
-		return errors.Wrapf(err, "failed to parse template for %s", p.Name)
+		return fmt.Errorf("failed to parse template for %s: %w", p.Name, err)
 	}
 	err = t.Execute(w, p.Data)
 	if err != nil {
-		return errors.Wrapf(err, "failed to execute template for %s", p.Name)
+		return fmt.Errorf("failed to execute template for %s: %w", p.Name, err)
 	}
 
 	return nil

@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,112 +17,72 @@ package applier
 
 import (
 	"context"
+	"fmt"
 	"path"
-	"time"
 
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/fsnotify.v1"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/k0sproject/k0s/internal/util"
+	"github.com/k0sproject/k0s/pkg/component/controller"
 	"github.com/k0sproject/k0s/pkg/constant"
 	kubeutil "github.com/k0sproject/k0s/pkg/kubernetes"
-	"github.com/k0sproject/k0s/pkg/leaderelection"
 )
 
 // Manager is the Component interface wrapper for Applier
 type Manager struct {
-	applier              Applier
-	bundlePath           string
-	cancelLeaderElection context.CancelFunc
-	cancelWatcher        context.CancelFunc
-	client               kubernetes.Interface
-	K0sVars              constant.CfgVars
-	log                  *logrus.Entry
-	stacks               map[string]*StackApplier
+	K0sVars           constant.CfgVars
+	KubeClientFactory kubeutil.ClientFactory
+
+	//client               kubernetes.Interface
+	applier       Applier
+	bundlePath    string
+	cancelWatcher context.CancelFunc
+	log           *logrus.Entry
+	stacks        map[string]*StackApplier
+
+	LeaderElector controller.LeaderElector
 }
 
 // Init initializes the Manager
 func (m *Manager) Init() error {
 	err := util.InitDirectory(m.K0sVars.ManifestsDir, constant.ManifestsDirMode)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create manifest bundle dir %s", m.K0sVars.ManifestsDir)
+		return fmt.Errorf("failed to create manifest bundle dir %s: %w", m.K0sVars.ManifestsDir, err)
 	}
 	m.log = logrus.WithField("component", "applier-manager")
 	m.stacks = make(map[string]*StackApplier)
 	m.bundlePath = m.K0sVars.ManifestsDir
 
-	m.applier = NewApplier(m.K0sVars.ManifestsDir, m.K0sVars.AdminKubeConfigPath)
+	m.applier = NewApplier(m.K0sVars.ManifestsDir, m.KubeClientFactory)
+
+	m.LeaderElector.AddAcquiredLeaseCallback(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancelWatcher = cancel
+		go func() {
+			_ = m.runWatchers(ctx)
+		}()
+	})
+	m.LeaderElector.AddLostLeaseCallback(func() {
+		if m.cancelWatcher != nil {
+			m.cancelWatcher()
+		}
+	})
+
 	return err
-}
-
-func (m *Manager) retrieveKubeClient() error {
-	client, err := kubeutil.Client(m.K0sVars.AdminKubeConfigPath)
-	if err != nil {
-		return err
-	}
-
-	m.client = client
-
-	return nil
 }
 
 // Run runs the Manager
 func (m *Manager) Run() error {
-	log := m.log
-
-	for m.client == nil {
-		log.Debug("retrieving kube client config")
-		_ = m.retrieveKubeClient()
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	leasePool, err := leaderelection.NewLeasePool(m.client, "k0s-manifest-applier", leaderelection.WithLogger(log))
-
-	if err != nil {
-		return err
-	}
-
-	electionEvents := &leaderelection.LeaseEvents{
-		AcquiredLease: make(chan struct{}),
-		LostLease:     make(chan struct{}),
-	}
-
-	go m.watchLeaseEvents(electionEvents)
-	go func() {
-		_, cancel, _ := leasePool.Watch(leaderelection.WithOutputChannels(electionEvents))
-		m.cancelLeaderElection = cancel
-	}()
-
 	return nil
 }
 
 // Stop stops the Manager
 func (m *Manager) Stop() error {
-	m.cancelLeaderElection()
-	return nil
-}
-
-func (m *Manager) watchLeaseEvents(events *leaderelection.LeaseEvents) {
-	log := m.log
-
-	for {
-		select {
-		case <-events.AcquiredLease:
-			log.Info("acquired leader lease")
-			ctx, cancel := context.WithCancel(context.Background())
-			m.cancelWatcher = cancel
-			go func() {
-				_ = m.runWatchers(ctx)
-			}()
-		case <-events.LostLease:
-			log.Info("lost leader lease")
-			if m.cancelWatcher != nil {
-				m.cancelWatcher()
-			}
-		}
+	if m.cancelWatcher != nil {
+		m.cancelWatcher()
 	}
+	return nil
 }
 
 func (m *Manager) runWatchers(ctx context.Context) error {
@@ -186,7 +146,7 @@ func (m *Manager) createStack(name string) error {
 		return nil
 	}
 	m.log.WithField("stack", name).Info("registering new stack")
-	sa, err := NewStackApplier(name, m.K0sVars.AdminKubeConfigPath)
+	sa, err := NewStackApplier(name, m.KubeClientFactory)
 	if err != nil {
 		return err
 	}
@@ -218,7 +178,7 @@ func (m *Manager) removeStack(name string) error {
 		m.log.WithField("stack", name).WithError(err).Warn("failed to stop and delete a stack applier")
 		return err
 	}
-
+	m.log.WithField("stack", name).Info("stack deleted succesfully")
 	delete(m.stacks, name)
 
 	return nil

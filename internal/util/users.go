@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,15 +29,6 @@ func GetUID(name string) (int, error) {
 	return strconv.Atoi(entry.Uid)
 }
 
-// GetGID returns gid of given groupname and logs a warning if its missing
-func GetGID(name string) (int, error) {
-	entry, err := user.LookupGroup(name)
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(entry.Gid)
-}
-
 func CheckIfUserExists(name string) (bool, error) {
 	_, err := user.Lookup(name)
 	if _, ok := err.(user.UnknownUserError); ok {
@@ -48,15 +39,3 @@ func CheckIfUserExists(name string) (bool, error) {
 	}
 	return true, nil
 }
-
-/*
-func GetLinuxDist() (string, error) {
-	if runtime.GOOS == "windows" {
-		return "", fmt.Errorf("unsupported OS")
-	}
-	cfg, err := ini.Load("/etc/os-release")
-	if err != nil {
-		fmt.Printf("failed to read file: %v", err)
-	}
-	return cfg.Section("").Key("ID").String(), nil
-}*/

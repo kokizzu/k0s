@@ -3,8 +3,10 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"runtime"
 
-	"gopkg.in/segmentio/analytics-go.v3"
+	"github.com/segmentio/analytics-go"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/k0sproject/k0s/internal/util"
@@ -15,9 +17,19 @@ import (
 type telemetryData struct {
 	StorageType            string
 	ClusterID              string
-	Version                string
 	WorkerNodesCount       int
 	ControlPlaneNodesCount int
+	WorkerData             []workerData
+	CPUTotal               int64
+	MEMTotal               int64
+}
+
+// Cannot use properly typed structs as they fail to be parsed properly on segment side :(
+type workerData map[string]interface{}
+
+type workerSums struct {
+	cpuTotal int64
+	memTotal int64
 }
 
 func (td telemetryData) asProperties() analytics.Properties {
@@ -26,7 +38,9 @@ func (td telemetryData) asProperties() analytics.Properties {
 		"clusterID":              td.ClusterID,
 		"workerNodesCount":       td.WorkerNodesCount,
 		"controlPlaneNodesCount": td.ControlPlaneNodesCount,
-		"version":                td.Version,
+		"workerData":             td.WorkerData,
+		"memTotal":               td.MEMTotal,
+		"cpuTotal":               td.CPUTotal,
 	}
 }
 
@@ -34,17 +48,21 @@ func (c Component) collectTelemetry() (telemetryData, error) {
 	var err error
 	data := telemetryData{}
 
-	data.Version = c.Version
 	data.StorageType = c.getStorageType()
 	data.ClusterID, err = c.getClusterID()
 
 	if err != nil {
 		return data, fmt.Errorf("can't collect cluster ID: %v", err)
 	}
-	data.WorkerNodesCount, err = c.getWorkerNodeCount()
+	wds, sums, err := c.getWorkerData()
 	if err != nil {
 		return data, fmt.Errorf("can't collect workers count: %v", err)
 	}
+
+	data.WorkerNodesCount = len(wds)
+	data.WorkerData = wds
+	data.MEMTotal = sums.memTotal
+	data.CPUTotal = sums.cpuTotal
 	data.ControlPlaneNodesCount, err = c.getControlPlaneNodeCount()
 	if err != nil {
 		return data, fmt.Errorf("can't collect control plane nodes count: %v", err)
@@ -72,12 +90,28 @@ func (c Component) getClusterID() (string, error) {
 	return fmt.Sprintf("kube-system:%s", ns.UID), nil
 }
 
-func (c Component) getWorkerNodeCount() (int, error) {
+func (c Component) getWorkerData() ([]workerData, workerSums, error) {
 	nodes, err := c.kubernetesClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	if err != nil {
-		return 0, err
+		return nil, workerSums{}, err
 	}
-	return len(nodes.Items), nil
+
+	wds := make([]workerData, len(nodes.Items))
+	var memTotal int64
+	var cpuTotal int64
+	for idx, n := range nodes.Items {
+		wd := workerData{
+			"os":   n.Status.NodeInfo.OSImage,
+			"arch": n.Status.NodeInfo.Architecture,
+			"cpus": n.Status.Capacity.Cpu().Value(),
+			"mem":  n.Status.Capacity.Memory().ScaledValue(resource.Mega),
+		}
+		wds[idx] = wd
+		memTotal += n.Status.Capacity.Memory().ScaledValue(resource.Mega)
+		cpuTotal += n.Status.Capacity.Cpu().Value()
+	}
+
+	return wds, workerSums{cpuTotal: cpuTotal, memTotal: memTotal}, nil
 }
 
 func (c Component) getControlPlaneNodeCount() (int, error) {
@@ -104,11 +138,24 @@ func (c Component) sendTelemetry() {
 		c.log.WithError(err).Warning("can't prepare telemetry data")
 		return
 	}
-	c.log.WithField("data", data).Info("sending telemetry")
+
+	hostData := analytics.Context{
+		Extra: map[string]interface{}{"direct": true},
+	}
+
+	hostData.App.Version = c.Version
+	hostData.App.Name = "k0s"
+	hostData.App.Namespace = "k0s"
+	hostData.Extra["cpuArch"] = runtime.GOARCH
+
+	addSysInfo(&hostData)
+
+	c.log.WithField("data", data).WithField("hostdata", hostData).Info("sending telemetry")
 	if err := c.analyticsClient.Enqueue(analytics.Track{
 		AnonymousId: machineID(),
 		Event:       heartbeatEvent,
 		Properties:  data.asProperties(),
+		Context:     &hostData,
 	}); err != nil {
 		c.log.WithError(err).Warning("can't send telemetry data")
 	}

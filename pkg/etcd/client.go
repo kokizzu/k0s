@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,38 +20,40 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/pkg/errors"
-
 	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 	"go.etcd.io/etcd/pkg/transport"
 )
 
 // Client is our internal helper to access some of the etcd APIs
 type Client struct {
-	client *clientv3.Client
+	Config  *clientv3.Config
+	client  *clientv3.Client
+	tlsInfo transport.TLSInfo
 }
 
 // NewClient creates new Client
 func NewClient(certDir string, etcdCertDir string) (*Client, error) {
 	client := &Client{}
-	tlsInfo := transport.TLSInfo{
+	client.tlsInfo = transport.TLSInfo{
 		CertFile:      filepath.Join(certDir, "apiserver-etcd-client.crt"),
 		KeyFile:       filepath.Join(certDir, "apiserver-etcd-client.key"),
 		TrustedCAFile: filepath.Join(etcdCertDir, "ca.crt"),
 	}
 
-	tlsConfig, err := tlsInfo.ClientConfig()
+	tlsConfig, err := client.tlsInfo.ClientConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	cli, _ := clientv3.New(clientv3.Config{
+	cfg := clientv3.Config{
 		Endpoints: []string{"https://127.0.0.1:2379"},
 		TLS:       tlsConfig,
-	})
+	}
+	cli, _ := clientv3.New(cfg)
 
 	client.client = cli
-
+	client.Config = &cfg
 	return client, nil
 }
 
@@ -82,7 +84,7 @@ func (c *Client) AddMember(ctx context.Context, name, peerAddress string) ([]str
 
 	newID := addResp.Member.ID
 
-	memberList := []string{}
+	var memberList []string
 	for _, m := range addResp.Members {
 		memberName := m.Name
 		if m.ID == newID {
@@ -98,7 +100,7 @@ func (c *Client) AddMember(ctx context.Context, name, peerAddress string) ([]str
 func (c *Client) GetPeerIDByAddress(ctx context.Context, peerAddress string) (uint64, error) {
 	resp, err := c.client.MemberList(ctx)
 	if err != nil {
-		return 0, errors.Wrap(err, "etcd member list failed")
+		return 0, fmt.Errorf("etcd member list failed: %w", err)
 	}
 	for _, m := range resp.Members {
 		for _, peerURL := range m.PeerURLs {
@@ -107,7 +109,7 @@ func (c *Client) GetPeerIDByAddress(ctx context.Context, peerAddress string) (ui
 			}
 		}
 	}
-	return 0, errors.Errorf("peer not found: %s", peerAddress)
+	return 0, fmt.Errorf("peer not found: %s", peerAddress)
 }
 
 // DeleteMember deletes member by peer name
@@ -119,4 +121,18 @@ func (c *Client) DeleteMember(ctx context.Context, peerID uint64) error {
 // Close closes the etcd client
 func (c *Client) Close() {
 	c.client.Close()
+}
+
+// Health return err if the etcd peer is not reported as healthy
+// ref: https://github.com/etcd-io/etcd/blob/3ead91ca3edf66112d56c453169343515bba71c3/etcdctl/ctlv3/command/ep_command.go#L89
+func (c *Client) Health(ctx context.Context) error {
+	_, err := c.client.Get(ctx, "health")
+
+	// permission denied is OK since proposal goes through consensus to get it
+	if err == nil || err == rpctypes.ErrPermissionDenied {
+		return nil
+	}
+
+	return err
+
 }

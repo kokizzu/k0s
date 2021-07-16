@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,30 +22,29 @@ import (
 	"path"
 	"path/filepath"
 
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 
+	"github.com/k0sproject/k0s/pkg/kubernetes"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 )
 
 // Applier manages all the "static" manifests and applies them on the k8s API
 type Applier struct {
-	Name       string
-	Dir        string
-	KubeConfig string
+	Name string
+	Dir  string
 
 	log             *logrus.Entry
+	clientFactory   kubernetes.ClientFactory
 	client          dynamic.Interface
 	discoveryClient discovery.CachedDiscoveryInterface
 }
 
 // NewApplier creates new Applier
-func NewApplier(dir string, kubeconfig string) Applier {
+func NewApplier(dir string, kubeClientFactory kubernetes.ClientFactory) Applier {
 	name := filepath.Base(dir)
 	log := logrus.WithFields(logrus.Fields{
 		"component": "applier",
@@ -53,38 +52,32 @@ func NewApplier(dir string, kubeconfig string) Applier {
 	})
 
 	return Applier{
-		log:        log,
-		Dir:        dir,
-		Name:       name,
-		KubeConfig: kubeconfig,
+		log:           log,
+		Dir:           dir,
+		Name:          name,
+		clientFactory: kubeClientFactory,
 	}
 }
 
 func (a *Applier) init() error {
-	cfg, err := clientcmd.BuildConfigFromFlags("", a.KubeConfig)
+	c, err := a.clientFactory.GetDynamicClient()
+	if err != nil {
+		return err
+	}
+	discoveryClient, err := a.clientFactory.GetDiscoveryClient()
 	if err != nil {
 		return err
 	}
 
-	client, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return err
-	}
-	a.client = client
-
-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(cfg)
-	cachedDiscoveryClient := memory.NewMemCacheClient(discoveryClient)
-	if err != nil {
-		return err
-	}
-	a.discoveryClient = cachedDiscoveryClient
+	a.client = c
+	a.discoveryClient = discoveryClient
 
 	return nil
 }
 
-// Apply resources
-func (a *Applier) Apply() error {
-	if a.client == nil {
+// just a wrapper for the retry as we need to init "lazily" from both apply and delete directions
+func (a *Applier) lazyInit() error {
+	if a.client == nil || a.discoveryClient == nil {
 		err := retry.OnError(retry.DefaultBackoff, func(err error) bool {
 			return true
 		}, a.init)
@@ -92,6 +85,16 @@ func (a *Applier) Apply() error {
 		if err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// Apply resources
+func (a *Applier) Apply() error {
+	err := a.lazyInit()
+	if err != nil {
+		return err
 	}
 	files, err := filepath.Glob(path.Join(a.Dir, "*.yaml"))
 	if err != nil {
@@ -121,6 +124,10 @@ func (a *Applier) Apply() error {
 
 // Delete deletes the entire stack by applying it with empty set of resources
 func (a *Applier) Delete() error {
+	err := a.lazyInit()
+	if err != nil {
+		return err
+	}
 	stack := Stack{
 		Name:      a.Name,
 		Resources: []*unstructured.Unstructured{},
@@ -128,13 +135,14 @@ func (a *Applier) Delete() error {
 		Discovery: a.discoveryClient,
 	}
 	logrus.Debugf("about to delete a stack %s with empty apply", a.Name)
-	err := stack.Apply(context.Background(), true)
+	err = stack.Apply(context.Background(), true)
 	return err
 }
 
 func (a *Applier) parseFiles(files []string) ([]*unstructured.Unstructured, error) {
-	resources := []*unstructured.Unstructured{}
+	var resources []*unstructured.Unstructured
 	for _, file := range files {
+		// TODO Probably better to pass in the file stream into decoder and not to read it fully to mem first
 		source, err := ioutil.ReadFile(file)
 		if err != nil {
 			return nil, err

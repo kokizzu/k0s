@@ -1,18 +1,23 @@
-
-runc_version = 1.0.0-rc92
-containerd_version = 1.4.3
-kubernetes_version = 1.20.0
-kine_version = 0.6.0
-etcd_version = 3.4.14
-konnectivity_version = 0.0.14
-
-bindir = staging/linux/bin
-bins = runc kubelet containerd containerd-shim containerd-shim-runc-v1 containerd-shim-runc-v2 kube-apiserver kube-scheduler kube-controller-manager etcd kine konnectivity-server
-
-buildmode = docker
+include Makefile.variables
 
 GOOS ?= linux
 export GOOS
+
+TARGET_OS ?= linux
+export TARGET_OS
+
+bindir = staging/${TARGET_OS}/bin
+posix_bins = runc kubelet containerd containerd-shim containerd-shim-runc-v1 containerd-shim-runc-v2 kube-apiserver kube-scheduler kube-controller-manager etcd kine konnectivity-server
+windows_bins = kubelet.exe kube-proxy.exe
+buildmode = docker
+
+
+
+ifeq ($(TARGET_OS),windows)
+bins = ${windows_bins}
+else
+bins = ${posix_bins}
+endif
 
 .PHONY: all
 all: $(addprefix $(bindir)/, $(bins))
@@ -21,16 +26,15 @@ all: $(addprefix $(bindir)/, $(bins))
 clean:
 	for i in .container.*; do \
 		if [ -f $$i ]; then \
-			docker rm $$(cat $$i); rm $$i; \
+			docker rm $$(cat $$i) && rm $$i; \
 		fi; \
 	done
 	for i in .docker-image.*; do \
 		if [ -f $$i ]; then \
-			docker rmi k0sbuild$$(basename $$i .stamp) ; rm $$i;\
+			docker rmi -f k0sbuild$$(basename $$i .stamp) && rm $$i;\
 		fi; \
 	done
-	rm -rf staging
-	rm -rf .tmp/*
+	rm -rf staging .tmp/* *.tmp
 
 $(bindir):
 	mkdir -p $@
@@ -50,6 +54,8 @@ $(bindir)/kine: .container.kine
 $(bindir)/konnectivity-server: .container.konnectivity
 $(bindir)/kubelet $(bindir)/kube-apiserver $(bindir)/kube-scheduler $(bindir)/kube-controller-manager: .container.kubernetes
 
+$(bindir)/kubelet.exe $(bindir)/kube-proxy.exe: .container.kubernetes.windows
+
 $(addprefix $(bindir)/, $(bins)): | $(bindir)
 	docker export $$(cat $<) | tar -C $(dir $(bindir)) -xv bin/$(notdir $@) && touch $@
 
@@ -57,8 +63,28 @@ $(addprefix $(bindir)/, $(bins)): | $(bindir)
 	docker create k0sbuild$(basename $<) > $@.tmp
 	mv $@.tmp $@
 
-.docker-image.%.stamp: %/Dockerfile Makefile
-	docker build -t k0sbuild$(basename $@) --build-arg VERSION=$($(patsubst %/Dockerfile,%,$<)_version) -f $< .
+.container.%.windows: .docker-image.%.windows.stamp
+	docker create k0sbuild$(basename $<) > $@.tmp
+	mv $@.tmp $@
+
+.docker-image.%.stamp: %/Dockerfile Makefile.variables
+	docker build -t k0sbuild$(basename $@) \
+		--build-arg VERSION=$($(patsubst %/Dockerfile,%,$<)_version) \
+		--build-arg BUILDIMAGE=$($(patsubst %/Dockerfile,%,$<)_buildimage) \
+		--build-arg BUILD_GO_TAGS=$($(patsubst %/Dockerfile,%,$<)_build_go_tags) \
+		--build-arg BUILD_GO_CGO_ENABLED=$($(patsubst %/Dockerfile,%,$<)_build_go_cgo_enabled) \
+		--build-arg BUILD_SHIM_GO_CGO_ENABLED=$($(patsubst %/Dockerfile,%,$<)_build_shim_go_cgo_enabled) \
+		--build-arg BUILD_GO_FLAGS=$($(patsubst %/Dockerfile,%,$<)_build_go_flags) \
+		--build-arg BUILD_GO_LDFLAGS=$($(patsubst %/Dockerfile,%,$<)_build_go_ldflags) \
+		--build-arg BUILD_GO_LDFLAGS_EXTRA=$($(patsubst %/Dockerfile,%,$<)_build_go_ldflags_extra) \
+		-f $< .
+	touch $@
+
+.docker-image.%.windows.stamp: %/Dockerfile.windows Makefile.variables
+	docker build -t k0sbuild$(basename $@) \
+		--build-arg VERSION=$($(patsubst %/Dockerfile.windows,%,$<)_version) \
+		--build-arg BUILDIMAGE=$($(patsubst %/Dockerfile.windows,%,$<)_buildimage) \
+		-f $< .
 	touch $@
 
 else

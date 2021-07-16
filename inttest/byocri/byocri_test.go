@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,13 +33,13 @@ type BYOCRISuite struct {
 
 func (s *BYOCRISuite) TestK0sGetsUp() {
 
-	s.NoError(s.InitMainController("/tmp/k0s.yaml", ""))
+	s.NoError(s.InitController(0))
 	s.Require().NoError(s.runDockerWorker())
 
-	kc, err := s.KubeClient("controller0", "")
+	kc, err := s.KubeClient(s.ControllerNode(0))
 	s.NoError(err)
 
-	err = s.WaitForNodeReady("worker0", kc)
+	err = s.WaitForNodeReady(s.WorkerNode(0), kc)
 	s.NoError(err)
 
 	pods, err := kc.CoreV1().Pods("kube-system").List(context.TODO(), v1.ListOptions{
@@ -52,19 +52,19 @@ func (s *BYOCRISuite) TestK0sGetsUp() {
 	s.T().Logf("found %d pods in kube-system", podCount)
 	s.Greater(podCount, 0, "expecting to see few pods in kube-system namespace")
 
-	s.T().Log("waiting to see calico pods ready")
-	s.NoError(common.WaitForCalicoReady(kc), "calico did not start")
+	s.T().Log("waiting to see CNI pods ready")
+	s.NoError(common.WaitForKubeRouterReady(kc), "CNI did not start")
 }
 
 func (s *BYOCRISuite) runDockerWorker() error {
-	token, err := s.GetJoinToken("worker", "")
+	token, err := s.GetJoinToken("worker")
 	if err != nil {
 		return err
 	}
 	if token == "" {
 		return fmt.Errorf("got empty token for worker join")
 	}
-	sshWorker, err := s.SSH("worker0")
+	sshWorker, err := s.SSH(s.WorkerNode(0))
 	if err != nil {
 		return err
 	}

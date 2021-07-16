@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import (
 
 	"github.com/k0sproject/k0s/pkg/constant"
 	k8sutil "github.com/k0sproject/k0s/pkg/kubernetes"
-	"github.com/pkg/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -33,7 +32,7 @@ type KubeletConfigClient struct {
 
 // NewKubeletConfigClient creates new KubeletConfigClient using the specified kubeconfig
 func NewKubeletConfigClient(kubeconfigPath string) (*KubeletConfigClient, error) {
-	kubeClient, err := k8sutil.Client(kubeconfigPath)
+	kubeClient, err := k8sutil.NewClient(kubeconfigPath)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +47,7 @@ func (k *KubeletConfigClient) Get(profile string) (string, error) {
 	cmName := fmt.Sprintf("kubelet-config-%s-%s", profile, constant.KubernetesMajorMinorVersion)
 	cm, err := k.kubeClient.CoreV1().ConfigMaps("kube-system").Get(context.TODO(), cmName, v1.GetOptions{})
 	if err != nil {
-		return "", errors.Wrap(err, "failed to get kubelet config from API")
+		return "", fmt.Errorf("failed to get kubelet config from API: %w", err)
 	}
 	config := cm.Data["kubelet"]
 	if config == "" {

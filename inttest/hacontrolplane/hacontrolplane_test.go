@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@ package hacontrolplane
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -33,9 +35,9 @@ type HAControlplaneSuite struct {
 func (s *HAControlplaneSuite) getMembers(fromControllerIdx int) map[string]string {
 	// our etcd instances doesn't listen on public IP, so test is performed by calling CLI tools over ssh
 	// which in general even makes sense, we can test tooling as well
-	node := fmt.Sprintf("controller%d", fromControllerIdx)
-	sshCon, err := s.SSH(node)
+	sshCon, err := s.SSH(s.ControllerNode(fromControllerIdx))
 	s.NoError(err)
+	defer sshCon.Disconnect()
 	output, err := sshCon.ExecWithOutput("k0s etcd member-list")
 	output = lastLine(output)
 	s.NoError(err)
@@ -49,11 +51,11 @@ func (s *HAControlplaneSuite) getMembers(fromControllerIdx int) map[string]strin
 }
 
 func (s *HAControlplaneSuite) makeNodeLeave(executeOnControllerIdx int, peerAddress string) {
-	node := fmt.Sprintf("controller%d", executeOnControllerIdx)
-	sshCon, err := s.SSH(node)
+	sshCon, err := s.SSH(s.ControllerNode(executeOnControllerIdx))
 	s.NoError(err)
+	defer sshCon.Disconnect()
 	for i := 0; i < 20; i++ {
-		_, err = sshCon.ExecWithOutput(fmt.Sprintf("k0s etcd leave %s", peerAddress))
+		_, err := sshCon.ExecWithOutput(fmt.Sprintf("k0s etcd leave --peer-address %s", peerAddress))
 		if err == nil {
 			break
 		}
@@ -63,26 +65,24 @@ func (s *HAControlplaneSuite) makeNodeLeave(executeOnControllerIdx int, peerAddr
 	s.NoError(err)
 }
 
-func (s *HAControlplaneSuite) getCa(controllerIdx int) string {
-	node := fmt.Sprintf("controller%d", controllerIdx)
-	sshCon, err := s.SSH(node)
-	s.NoError(err)
-	ca, err := sshCon.ExecWithOutput("cat /var/lib/k0s/pki/ca.crt")
-	s.NoError(err)
-
-	return ca
-}
-
 func (s *HAControlplaneSuite) TestDeregistration() {
-	s.NoError(s.InitMainController("/tmp/k0s.yaml", ""))
-	token, err := s.GetJoinToken("controller", "")
-	s.NoError(err)
-	s.NoError(s.JoinController(1, token, ""))
+	// Verify that k0s return failure (https://github.com/k0sproject/k0s/issues/790)
+	sshC0, err := s.SSH(s.ControllerNode(0))
+	s.Require().NoError(err)
+	_, err = sshC0.ExecWithOutput("k0s etcd member-list")
+	s.Require().Error(err)
 
-	ca0 := s.getCa(0)
+	s.NoError(s.InitController(0))
+	s.NoError(s.WaitJoinAPI(s.ControllerNode(0)))
+	token, err := s.GetJoinToken("controller")
+	s.NoError(err)
+	s.NoError(s.InitController(1, token))
+	s.NoError(s.WaitJoinAPI(s.ControllerNode(1)))
+
+	ca0 := s.GetFileFromController(0, "/var/lib/k0s/pki/ca.crt")
 	s.Contains(ca0, "-----BEGIN CERTIFICATE-----")
 
-	ca1 := s.getCa(1)
+	ca1 := s.GetFileFromController(1, "/var/lib/k0s/pki/ca.crt")
 	s.Contains(ca1, "-----BEGIN CERTIFICATE-----")
 
 	s.Equal(ca0, ca1)
@@ -103,22 +103,24 @@ func (s *HAControlplaneSuite) TestDeregistration() {
 
 	// Restart the second controller with a token to see it comes up
 	// It should just ignore the token as there's CA etc already in place
-	sshC1, err := s.SSH("controller1")
+	sshC1, err := s.SSH(s.ControllerNode(1))
 	s.Require().NoError(err)
-	_, err = sshC1.ExecWithOutput("kill $(pidof k0s)")
+	defer sshC1.Disconnect()
+	_, err = sshC1.ExecWithOutput("kill $(pidof k0s) && while pidof k0s; do sleep 0.1s; done")
 	s.Require().NoError(err)
-	s.NoError(s.JoinController(1, token, ""))
+	s.NoError(s.InitController(1, token))
+	s.NoError(s.WaitJoinAPI(s.ControllerNode(1)))
 
 	// Make one member leave the etcd cluster
-	s.makeNodeLeave(1, membersFromJoined["controller1"])
+	peerURL := membersFromJoined[s.ControllerNode(1)]
+	s.makeNodeLeave(1, getHostnameFromURL(peerURL))
 	refreshedMembers := s.getMembers(0)
 	s.Len(refreshedMembers, 1)
-	s.Contains(refreshedMembers, "controller0")
+	s.Contains(refreshedMembers, s.ControllerNode(0))
 
 }
 
 func TestHAControlplaneSuite(t *testing.T) {
-
 	s := HAControlplaneSuite{
 		common.FootlooseSuite{
 			ControllerCount: 2,
@@ -127,6 +129,15 @@ func TestHAControlplaneSuite(t *testing.T) {
 
 	suite.Run(t, &s)
 
+}
+
+func getHostnameFromURL(s string) string {
+	u, err := url.Parse(s)
+	if err != nil {
+		return ""
+	}
+	hostName, _, _ := net.SplitHostPort(u.Host)
+	return hostName
 }
 
 func lastLine(text string) string {

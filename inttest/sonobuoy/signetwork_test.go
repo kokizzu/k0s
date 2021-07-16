@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,11 +44,17 @@ func (s *NetworkSuite) TestSigNetwork() {
 	kc, err := s.KubeClient(s.ControllerIP)
 	s.NoError(err)
 
+	kubeConfig, err := s.GetKubeConfig(s.ControllerIP)
+	s.NoError(err)
+
 	err = s.WaitForNodeReady("worker-0", kc)
 	s.NoError(err)
 
 	err = s.WaitForNodeReady("worker-1", kc)
 	s.NoError(err)
+
+	s.T().Log("waiting to see metrics ready")
+	s.Require().NoError(common.WaitForMetricsReady(kubeConfig))
 
 	kubeconfigPath := s.dumpKubeConfig()
 	s.T().Logf("kubeconfig at: %s", kubeconfigPath)
@@ -64,6 +70,7 @@ func (s *NetworkSuite) TestSigNetwork() {
 		`--e2e-focus=\[sig-network\].*\[Conformance\]`,
 		`--e2e-skip=\[Serial\]`,
 		"--e2e-parallel=y",
+		"--kube-conformance-image-version=v1.21.2",
 	}
 	s.T().Log("running sonobuoy, this may take a while")
 	sonoFinished := make(chan bool)
@@ -89,7 +96,7 @@ func (s *NetworkSuite) TestSigNetwork() {
 	}
 	s.NoError(err)
 
-	s.T().Log("sonobuoy has been ran succesfully, collecting results")
+	s.T().Log("sonobuoy has been ran successfully, collecting results")
 	results, err := s.retrieveResults()
 	s.NoError(err)
 	s.T().Logf("sonobuoy results:%+v", results)

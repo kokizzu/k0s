@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/stretchr/testify/suite"
@@ -57,6 +58,7 @@ func (s *VMSuite) GetConfig() {
 	tfDataFile, err := os.Open("../terraform/test-cluster/out.json")
 	if err != nil {
 		s.T().Logf("failed to read terraform output: %s", err.Error())
+		return
 	}
 	defer tfDataFile.Close()
 
@@ -74,7 +76,7 @@ func (s *VMSuite) GetConfig() {
 	s.WorkerIPs = tfMachineData.Workers.IP
 }
 
-// InitMainController inits first contorller assuming it's first controller in the cluster
+// InitMainController inits first controller assuming it's first controller in the cluster
 func (s *VMSuite) InitMainController() error {
 	s.GetConfig()
 	controllerNode := s.ControllerIP
@@ -84,7 +86,7 @@ func (s *VMSuite) InitMainController() error {
 	}
 	defer ssh.Disconnect()
 
-	startControllerCmd := "sudo nohup k0s --debug server >/tmp/k0s-server.log 2>&1 &"
+	startControllerCmd := "sudo nohup k0s controller --debug >/tmp/k0s-controller.log 2>&1 &"
 	_, err = ssh.ExecWithOutput(startControllerCmd)
 	if err != nil {
 		return err
@@ -141,7 +143,7 @@ func (s *VMSuite) RunWorkers() error {
 	if token == "" {
 		return fmt.Errorf("got empty token for worker join")
 	}
-	workerCommand := fmt.Sprintf(`sudo nohup k0s --debug worker "%s" >/tmp/k0s-worker.log 2>&1 &`, token)
+	workerCommand := fmt.Sprintf(`sudo nohup k0s worker --debug "%s" >/tmp/k0s-worker.log 2>&1 &`, token)
 	for i := 0; i < len(s.WorkerIPs); i++ {
 		workerNode := s.WorkerIPs[i]
 		sshWorker, err := s.SSH(workerNode)
@@ -200,6 +202,15 @@ func (s *VMSuite) WaitForNodeReady(node string, kc *kubernetes.Clientset) error 
 
 // KubeClient return kube client by loading the admin access config from given node
 func (s *VMSuite) KubeClient(node string) (*kubernetes.Clientset, error) {
+	cfg, err := s.GetKubeConfig(node)
+	if err != nil {
+		return nil, err
+	}
+	return kubernetes.NewForConfig(cfg)
+}
+
+// KubeClient return kube client by loading the admin access config from given node
+func (s *VMSuite) GetKubeConfig(node string) (*rest.Config, error) {
 	ssh, err := s.SSH(node)
 	if err != nil {
 		return nil, err
@@ -220,6 +231,5 @@ func (s *VMSuite) KubeClient(node string) (*kubernetes.Clientset, error) {
 	// Our CA data is valid for localhost, but we need to change that in order to connect from outside
 	cfg.Insecure = true
 	cfg.TLSClientConfig.CAData = nil
-
-	return kubernetes.NewForConfig(cfg)
+	return cfg, nil
 }

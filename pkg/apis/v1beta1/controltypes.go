@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ package v1beta1
 
 import "fmt"
 
-// CaResponse defines the reponse type for /ca control API
+// CaResponse defines the response type for /ca control API
 type CaResponse struct {
 	Key   []byte `json:"key"`
 	Cert  []byte `json:"cert"`

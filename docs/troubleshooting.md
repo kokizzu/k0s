@@ -1,13 +1,14 @@
-# Troubleshooting
+# Common Pitfalls
 
-There are few common cases we've seen where k0s fails to run properly. 
+There are few common cases we've seen where k0s fails to run properly.
 
 ## CoreDNS in crashloop
 
 The most common case we've encountered so far has been CoreDNS getting into crashloop on the node(s).
 
 With kubectl you see something like this:
-```sh
+
+```shell
 $ kubectl get pod --all-namespaces
 NAMESPACE     NAME                                       READY   STATUS    RESTARTS   AGE
 kube-system   calico-kube-controllers-5f6546844f-25px6   1/1     Running   0          167m
@@ -25,7 +26,8 @@ kube-system   metrics-server-7d4bcb75dd-pqkrs            1/1     Running   0    
 ```
 
 When you check the logs, it'll show something like this:
-```
+
+```shell
 $ kubectl -n kube-system logs coredns-5c98d7d4d8-tfs4q
 plugin/loop: Loop (127.0.0.1:55953 -> :1053) detected for zone ".", see https://coredns.io/plugins/loop#troubleshooting. Query: "HINFO 4547991504243258144.3688648895315093531."
 ```
@@ -36,17 +38,62 @@ The easiest but most crude way to workaround is to disable the systemd-resolved 
 
 Read more at CoreDNS [troubleshooting docs](https://coredns.io/plugins/loop/#troubleshooting-loops-in-kubernetes-clusters).
 
-## `k0s server` fails on ARM boxes
+## `k0s controller` fails on ARM boxes
 
 In the logs you probably see ETCD not starting up properly.
 
-Etcd is [not fully supported](https://github.com/etcd-io/etcd/blob/master/Documentation/op-guide/supported-platform.md#current-support) on ARM architecture, thus you need to run `k0s server` and thus also etcd process with env `ETCD_UNSUPPORTED_ARCH=arm64`.
+Etcd is [not fully supported](https://github.com/etcd-io/etcd/blob/master/Documentation/op-guide/supported-platform.md#current-support) on ARM architecture, thus you need to run `k0s controller` and thus also etcd process with env `ETCD_UNSUPPORTED_ARCH=arm64`.
 
 As Etcd is not fully supported on ARM architecture it also means that k0s controlplane with etcd itself is not fully supported on ARM either.
 
-
 ## Pods pending when using cloud providers
 
-Once we enable [cloud provider support](cloud-providers.md) on kubelet on worker nodes, kubelet will automatically add a taint `node.cloudprovider.kubernetes.io/uninitialized` for the node. This tain will prevent normal workloads to be scheduled on the node untill the cloud provider controller actually runs second initialization on the node and removes the taint. This means that these nodes are not schedulable untill the cloud provider controller is actually succesfully running on the cluster.
+Once we enable [cloud provider support](cloud-providers.md) on kubelet on worker nodes, kubelet will automatically add a taint `node.cloudprovider.kubernetes.io/uninitialized` for the node. This tain will prevent normal workloads to be scheduled on the node until the cloud provider controller actually runs second initialization on the node and removes the taint. This means that these nodes are not available for scheduling until the cloud provider controller is actually successfully running on the cluster.
 
 For troubleshooting your specific cloud provider see its documentation.
+
+## k0s not working with read only `/usr`
+
+By default k0s does not run on nodes where `/usr` is read only.
+
+This can be fixed by changing the default path for `volumePluginDir` in your k0s config. You will need to change to values, one for the kubelet itself, and one for Calico.
+
+Here is a snippet of an example config with the default values changed:
+
+```yaml
+spec:
+  controllerManager:
+    extraArgs:
+      flex-volume-plugin-dir: "/etc/kubernetes/kubelet-plugins/volume/exec"
+  network:
+    calico:
+      flexVolumeDriverPath: /etc/k0s/kubelet-plugins/volume/exec/nodeagent~uds
+  workerProfiles:
+    - name: coreos
+      values:
+        volumePluginDir: /etc/k0s/kubelet-plugins/volume/exec/
+```
+
+With this config you can start your controller as usual. Any workers will need to be started with
+
+```shell
+k0s worker --profile coreos [TOKEN]
+```
+
+## Profiling
+
+We drop any debug related information and symbols from the compiled binary by utilzing `-w -s` linker flags.
+
+To keep those symbols use `DEBUG` env variable:
+
+```shell
+DEBUG=true make k0s
+```
+
+Any value not equal to the "false" would work.
+
+To add custom linker flags use `LDFLAGS` variable.
+
+```shell
+LD_FLAGS="--custom-flag=value" make k0s
+```

@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ func TestCRISocketParsing(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			criType, sock, err := splitRuntimeConfig(tc.input)
+			criType, sock, err := SplitRuntimeConfig(tc.input)
 			if tc.err {
 				require.Error(t, err)
 			} else {

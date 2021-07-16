@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/user"
 )
 
 // IsDirectory check the given path exists and is a directory
@@ -59,25 +58,4 @@ func InitDirectory(path string, perm os.FileMode) error {
 	}
 
 	return nil
-}
-
-// HomeDir fetches the running user's home directory, regardless of Sudo
-func HomeDir() (string, error) {
-	var runUser string
-
-	if os.Getenv("SUDO_USER") != "" {
-		runUser = os.Getenv("SUDO_USER")
-	} else {
-		usr, err := user.Current()
-		if err != nil {
-			return "", fmt.Errorf("cannot resolve user")
-		}
-		runUser = usr.Name
-	}
-
-	usr, err := user.Lookup(runUser)
-	if err != nil {
-		return "", fmt.Errorf("cannot detect user's home directory: %v", err)
-	}
-	return usr.HomeDir, nil
 }

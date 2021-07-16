@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@ package assets
 
 import (
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/k0sproject/k0s/internal/util"
@@ -71,7 +71,7 @@ func Stage(dataDir string, name string, filemode os.FileMode) error {
 
 	err := util.InitDirectory(filepath.Dir(p), filemode)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create dir %s", filepath.Dir(p))
+		return fmt.Errorf("failed to create dir %s: %w", filepath.Dir(p), err)
 	}
 
 	if ExecutableIsOlder(p) {
@@ -101,31 +101,34 @@ func Stage(dataDir string, name string, filemode os.FileMode) error {
 
 	// find location at EOF - BinDataSize + offs
 	if _, err := infile.Seek(-BinDataSize+bin.offset, 2); err != nil {
-		return errors.Wrapf(err, "Failed to find embedded file position for %s", name)
+		return fmt.Errorf("failed to find embedded file position for %s: %w", name, err)
 	}
 	gz, err := gzip.NewReader(io.LimitReader(infile, bin.size))
 	if err != nil {
-		return errors.Wrapf(err, "Failed to create gzip reader for %s", name)
+		return fmt.Errorf("failed to create gzip reader for %s: %w", name, err)
 	}
 
 	logrus.Debug("Writing static file: ", p)
 
-	os.Remove(p)
+	if err := copyTo(p, gz); err != nil {
+		return err
+	}
+	if err := os.Chmod(p, 0550); err != nil {
+		return fmt.Errorf("failed to chmod %s: %w", name, err)
+	}
+	return nil
+}
+
+func copyTo(p string, gz io.Reader) error {
+	_ = os.Remove(p)
 	f, err := os.Create(p)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create %s", p)
+		return fmt.Errorf("failed to create %s: %w", p, err)
 	}
 	defer f.Close()
-
-	err = f.Chmod(0550)
-	if err != nil {
-		return errors.Wrapf(err, "failed to chmod %s", p)
-	}
-
 	_, err = io.Copy(f, gz)
 	if err != nil {
-		return errors.Wrapf(err, "failed to write to %s", name)
+		return fmt.Errorf("failed to write to %s: %w", p, err)
 	}
-
 	return nil
 }

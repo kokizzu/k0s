@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Mirantis, Inc.
+Copyright 2021 k0s authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,8 +16,10 @@ limitations under the License.
 package component
 
 import (
+	"context"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/k0sproject/k0s/pkg/performance"
 	"github.com/sirupsen/logrus"
@@ -27,13 +29,14 @@ import (
 // Manager manages components
 type Manager struct {
 	components []Component
-	sync       map[string]bool
+	sync       map[string]struct{}
 }
 
 // NewManager creates a manager
 func NewManager() *Manager {
 	return &Manager{
 		components: []Component{},
+		sync:       map[string]struct{}{},
 	}
 }
 
@@ -46,21 +49,18 @@ func (m *Manager) Add(component Component) {
 func (m *Manager) AddSync(component Component) {
 	m.components = append(m.components, component)
 	compName := reflect.TypeOf(component).Elem().Name()
-	if m.sync == nil {
-		m.sync = make(map[string]bool)
-	}
-	m.sync[compName] = true
+	m.sync[compName] = struct{}{}
 }
 
 // Init initializes all managed components
 func (m *Manager) Init() error {
-	g := new(errgroup.Group)
+	var g errgroup.Group
 
 	for _, comp := range m.components {
 		compName := reflect.TypeOf(comp).Elem().Name()
 		logrus.Infof("initializing %v\n", compName)
 		c := comp
-		if m.sync[compName] {
+		if _, found := m.sync[compName]; found {
 			if err := c.Init(); err != nil {
 				return err
 			}
@@ -74,16 +74,21 @@ func (m *Manager) Init() error {
 }
 
 // Start starts all managed components
-func (m *Manager) Start() error {
+func (m *Manager) Start(ctx context.Context) error {
+
 	perfTimer := performance.NewTimer("component-start").Buffer().Start()
 	for _, comp := range m.components {
 		compName := reflect.TypeOf(comp).Elem().Name()
 		perfTimer.Checkpoint(fmt.Sprintf("running-%s", compName))
 		logrus.Infof("starting %v", compName)
+
 		if err := comp.Run(); err != nil {
 			return err
 		}
 		perfTimer.Checkpoint(fmt.Sprintf("running-%s-done", compName))
+		if err := waitForHealthy(ctx, comp, compName); err != nil {
+			return err
+		}
 	}
 	perfTimer.Output()
 	return nil
@@ -101,4 +106,29 @@ func (m *Manager) Stop() error {
 		}
 	}
 	return ret
+}
+
+// waitForHealthy waits until the component is healthy and returns true upon success. If a timeout occurs, it returns false
+func waitForHealthy(ctx context.Context, comp Component, name string) error {
+	ctx, cancelFunction := context.WithTimeout(ctx, 2*time.Minute)
+
+	// clear up context after timeout
+	defer cancelFunction()
+
+	// loop forever, until the context is canceled or until etcd is healthy
+	ticker := time.NewTicker(100 * time.Millisecond)
+	for {
+		select {
+		case <-ticker.C:
+			logrus.Debugf("checking %s for health", name)
+			if err := comp.Healthy(); err != nil {
+				logrus.Errorf("health-check: %s might be down: %v", name, err)
+				continue
+			}
+			logrus.Debugf("%s is healthy. closing check", name)
+			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("%s health-check timed out", name)
+		}
+	}
 }
