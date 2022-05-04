@@ -9,7 +9,7 @@ require (
 	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/bombsimon/logrusr/v2 v2.0.1
 	github.com/cloudflare/cfssl v1.6.1
-	github.com/containerd/containerd v1.6.2
+	github.com/containerd/containerd v1.6.4
 	github.com/davecgh/go-spew v1.1.1
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/docker/libnetwork v0.8.0-dev.2.0.20201031180254-535ef365dc1d
@@ -24,7 +24,7 @@ require (
 	github.com/logrusorgru/aurora/v3 v3.0.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/olekukonko/tablewriter v0.0.5
-	github.com/opencontainers/image-spec v1.0.2
+	github.com/opencontainers/image-spec v1.0.3-0.20211202183452-c5a74bcca799
 	github.com/pkg/errors v0.9.1
 	github.com/rqlite/rqlite v4.6.0+incompatible
 	github.com/segmentio/analytics-go v3.1.0+incompatible
@@ -33,7 +33,7 @@ require (
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.10.0
 	github.com/stretchr/testify v1.7.1
-	github.com/urfave/cli v1.22.5
+	github.com/urfave/cli v1.22.8
 	github.com/vishvananda/netlink v1.1.1-0.20210330154013-f5de75959ad5
 	github.com/weaveworks/footloose v0.0.0-20210208164054-2862489574a3
 	github.com/zcalusic/sysinfo v0.0.0-20210905121133-6fa2f969a900
@@ -41,11 +41,11 @@ require (
 	go.etcd.io/etcd/client/pkg/v3 v3.5.4
 	go.etcd.io/etcd/client/v3 v3.5.4
 	go.etcd.io/etcd/etcdutl/v3 v3.5.4
-	go.uber.org/zap v1.19.1
+	go.uber.org/zap v1.21.0
 	golang.org/x/crypto v0.0.0-20220214200702-86341886e292
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/sys v0.0.0-20220209214540-3681064d5158
-	google.golang.org/grpc v1.43.0
+	google.golang.org/grpc v1.46.0
 	gopkg.in/fsnotify.v1 v1.4.7
 	gopkg.in/yaml.v2 v2.4.0
 	helm.sh/helm/v3 v3.8.2
@@ -81,12 +81,12 @@ require (
 	github.com/containerd/console v1.0.3 // indirect
 	github.com/containerd/continuity v0.2.2 // indirect
 	github.com/containerd/fifo v1.0.0 // indirect
-	github.com/containerd/go-cni v1.1.3 // indirect
+	github.com/containerd/go-cni v1.1.5 // indirect
 	github.com/containerd/go-runc v1.0.0 // indirect
 	github.com/containerd/ttrpc v1.1.0 // indirect
 	github.com/containerd/typeurl v1.0.2 // indirect
-	github.com/containernetworking/cni v1.0.1 // indirect
-	github.com/containernetworking/plugins v1.0.1 // indirect
+	github.com/containernetworking/cni v1.1.0 // indirect
+	github.com/containernetworking/plugins v1.1.1 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
@@ -103,7 +103,7 @@ require (
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/emicklei/go-restful v2.9.5+incompatible // indirect
-	github.com/envoyproxy/go-control-plane v0.10.1 // indirect
+	github.com/envoyproxy/go-control-plane v0.10.2-0.20220325020618-49ff273808a1 // indirect
 	github.com/envoyproxy/protoc-gen-validate v0.6.2 // indirect
 	github.com/exponent-io/jsonpath v0.0.0-20151013193312-d6023ce2651d // indirect
 	github.com/fatih/camelcase v1.0.0 // indirect
@@ -184,7 +184,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/runc v1.1.1 // indirect
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417 // indirect
-	github.com/opencontainers/selinux v1.10.0 // indirect
+	github.com/opencontainers/selinux v1.10.1 // indirect
 	github.com/pelletier/go-toml v1.9.4 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
