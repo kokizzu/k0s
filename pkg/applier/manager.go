@@ -20,13 +20,14 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/sirupsen/logrus"
-	"gopkg.in/fsnotify.v1"
-
 	"github.com/k0sproject/k0s/internal/pkg/dir"
+	"github.com/k0sproject/k0s/pkg/component"
 	"github.com/k0sproject/k0s/pkg/component/controller"
 	"github.com/k0sproject/k0s/pkg/constant"
 	kubeutil "github.com/k0sproject/k0s/pkg/kubernetes"
+
+	"github.com/fsnotify/fsnotify"
+	"github.com/sirupsen/logrus"
 )
 
 // Manager is the Component interface wrapper for Applier
@@ -43,6 +44,8 @@ type Manager struct {
 
 	LeaderElector controller.LeaderElector
 }
+
+var _ component.Component = (*Manager)(nil)
 
 // Init initializes the Manager
 func (m *Manager) Init(ctx context.Context) error {
@@ -85,14 +88,24 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
-// Reconcile reconciles the Manager
-func (m *Manager) Reconcile() error {
-	logrus.Debug("reconcile method called for: Manager")
-	return nil
-}
-
 func (m *Manager) runWatchers(ctx context.Context) error {
 	log := logrus.WithField("component", "applier-manager")
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.WithError(err).Error("failed to create watcher")
+		return err
+	}
+	defer watcher.Close()
+
+	err = watcher.Add(m.bundlePath)
+	if err != nil {
+		log.Warnf("Failed to start watcher: %s", err.Error())
+	}
+
+	// Add all directories after the bundle dir has been added to the watcher.
+	// Doing it the other way round introduces a race condition when directories
+	// get created after the initial listing but before the watch starts.
 
 	dirs, err := dir.GetAll(m.bundlePath)
 	if err != nil {
@@ -106,17 +119,6 @@ func (m *Manager) runWatchers(ctx context.Context) error {
 		}
 	}
 
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.WithError(err).Error("failed to create watcher")
-		return err
-	}
-	defer watcher.Close()
-
-	err = watcher.Add(m.bundlePath)
-	if err != nil {
-		log.Warnf("Failed to start watcher: %s", err.Error())
-	}
 	for {
 		select {
 		case err, ok := <-watcher.Errors:
@@ -147,18 +149,18 @@ func (m *Manager) runWatchers(ctx context.Context) error {
 }
 
 func (m *Manager) createStack(ctx context.Context, name string) error {
-	// safeguard in case the fswatcher would trigger an event for an already existing watcher
+	// safeguard in case the fswatcher would trigger an event for an already existing stack
 	if _, ok := m.stacks[name]; ok {
 		return nil
 	}
 	m.log.WithField("stack", name).Info("registering new stack")
-	sa, err := NewStackApplier(name, m.KubeClientFactory)
+	sa, err := NewStackApplier(ctx, name, m.KubeClientFactory)
 	if err != nil {
 		return err
 	}
 
 	go func() {
-		_ = sa.Start(ctx)
+		_ = sa.Start()
 	}()
 
 	m.stacks[name] = sa
@@ -174,12 +176,8 @@ func (m *Manager) removeStack(ctx context.Context, name string) error {
 			Debug("attempted to remove non-existent stack, probably not a directory")
 		return nil
 	}
-	err := sa.Stop()
-	if err != nil {
-		m.log.WithField("stack", name).WithError(err).Warn("failed to stop stack applier")
-		return err
-	}
-	err = sa.DeleteStack(ctx)
+	sa.Stop()
+	err := sa.DeleteStack(ctx)
 	if err != nil {
 		m.log.WithField("stack", name).WithError(err).Warn("failed to stop and delete a stack applier")
 		return err

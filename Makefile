@@ -1,7 +1,7 @@
 include embedded-bins/Makefile.variables
 include inttest/Makefile.variables
 
-GO_SRCS := $(shell find . -type f -name '*.go' -not -path './build/cache/*' -not -name 'zz_generated*')
+GO_SRCS := $(shell find . -type f -name '*.go' -not -path './build/cache/*' -not -path './inttest/*' -not -name '*_test.go' -not -name 'zz_generated*')
 GO_DIRS := . ./cmd/... ./pkg/... ./internal/... ./static/... ./hack/...
 
 # EMBEDDED_BINS_BUILDMODE can be either:
@@ -53,7 +53,7 @@ LD_FLAGS += -X k8s.io/component-base/version.gitVersion=v$(KUBECTL_VERSION)
 LD_FLAGS += -X k8s.io/component-base/version.gitMajor=$(KUBECTL_MAJOR)
 LD_FLAGS += -X k8s.io/component-base/version.gitMinor=$(KUBECTL_MINOR)
 LD_FLAGS += -X k8s.io/component-base/version.buildDate=$(BUILD_DATE)
-LD_FLAGS += -X k8s.io/component-base/version.gitCommit="not_available"
+LD_FLAGS += -X k8s.io/component-base/version.gitCommit=not_available
 LD_FLAGS += $(BUILD_GO_LDFLAGS_EXTRA)
 
 golint := $(shell which golangci-lint 2>/dev/null)
@@ -76,7 +76,7 @@ ifeq ($(go_controllergen),)
 go_controllergen := cd hack/ci-deps && go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.8.0 && cd ../.. && "${GOPATH}/bin/controller-gen"
 endif
 
-GOLANG_IMAGE = golang:$(go_version)-alpine
+GOLANG_IMAGE = golang:$(go_version)-alpine3.16
 GO ?= GOCACHE=/go/src/github.com/k0sproject/k0s/build/cache/go/build GOMODCACHE=/go/src/github.com/k0sproject/k0s/build/cache/go/mod docker run --rm \
 	-v "$(CURDIR)":/go/src/github.com/k0sproject/k0s \
 	-w /go/src/github.com/k0sproject/k0s \
@@ -97,7 +97,7 @@ endif
 
 .k0sbuild.docker-image.k0s: build/Dockerfile
 	docker build --rm \
-		--build-arg BUILDIMAGE=golang:$(go_version)-alpine \
+		--build-arg BUILDIMAGE=golang:$(go_version)-alpine3.16 \
 		-f build/Dockerfile \
 		-t k0sbuild.docker-image.k0s build/
 	touch $@
@@ -142,7 +142,7 @@ k0s: .k0sbuild.docker-image.k0s
 
 k0s.exe: TARGET_OS = windows
 k0s.exe: BUILD_GO_CGO_ENABLED = 0
-k0s.exe: GOLANG_IMAGE = golang:$(go_version)-alpine
+k0s.exe: GOLANG_IMAGE = golang:$(go_version)-alpine3.16
 
 k0s.exe k0s: $(codegen_targets)
 
